@@ -111,21 +111,33 @@ async function initApp() {
   // Listen for Supabase Authentication State changes
   supabase.auth.onAuthStateChange(async (event, session) => {
     console.log('Cambio de estado de autenticación:', event);
-    if (session && session.user) {
-      currentUser = session.user;
-      try {
-        currentProfile = await getProfile(currentUser.id);
-        setupDashboardView();
-      } catch (err) {
-        console.error('Error al cargar perfil tras login:', err);
-        // Fallback profile if database trigger is slightly delayed
-        currentProfile = { username: currentUser.email.split('@')[0] };
-        setupDashboardView();
+    try {
+      if (session && session.user) {
+        currentUser = session.user;
+        try {
+          currentProfile = await getProfile(currentUser.id);
+        } catch (err) {
+          console.error('Error al cargar perfil tras login:', err);
+          // Fallback profile if database trigger is slightly delayed or missing
+          const fallbackUsername = currentUser.email ? currentUser.email.split('@')[0] : `User_${currentUser.id.slice(0, 5)}`;
+          currentProfile = { username: fallbackUsername };
+        }
+        await setupDashboardView();
+      } else {
+        currentUser = null;
+        currentProfile = null;
+        setupAuthView();
       }
-    } else {
-      currentUser = null;
-      currentProfile = null;
-      setupAuthView();
+    } catch (authCycleError) {
+      console.error('Error crítico en ciclo de autenticación:', authCycleError);
+      alert('Error de inicialización de sesión: ' + (authCycleError.message || authCycleError));
+      
+      // Safety reset of the login submit button so it does not get stuck on 'Cargando...'
+      const authSubmitBtn = document.getElementById('auth-submit-btn');
+      if (authSubmitBtn) {
+        authSubmitBtn.disabled = false;
+        authSubmitBtn.innerText = isSignUpMode ? 'Registrarse' : 'Ingresar';
+      }
     }
   });
 }
