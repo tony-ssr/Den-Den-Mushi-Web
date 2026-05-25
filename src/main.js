@@ -210,7 +210,7 @@ logoutBtn.addEventListener('click', async () => {
 
 async function setupDashboardView() {
   showScreen('dashboard');
-  userBadge.innerText = `🐌 ${currentProfile.username}`;
+  userBadge.innerText = currentProfile.username;
   
   // Load and update dashboard systems
   await updateRoomsList();
