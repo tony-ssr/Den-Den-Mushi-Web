@@ -1,14 +1,7 @@
-const CACHE_NAME = 'denden-intercom-v1';
+const CACHE_NAME = 'denden-intercom-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
-  '/src/index.css',
-  '/src/main.js',
-  '/src/supabase.js',
-  '/src/audio.js',
-  '/src/webrtc.js',
-  '/sounds/gacha.mp3',
-  '/sounds/purupuru.mp3',
   '/images/dendenmushi/denden_dormido.png',
   '/images/dendenmushi/denden_activo.png',
   '/images/dendenmushi/denden_hablando.png',

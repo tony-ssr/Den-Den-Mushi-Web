@@ -91,3 +91,12 @@ alter table public.ice_candidates enable row level security;
 
 -- Políticas de seguridad para desarrollo libre de candidatos ICE
 create policy "Acceso total a candidatos ICE" on public.ice_candidates for all using (true) with check (true);
+
+-- ==============================================================================
+-- CONFIGURACIÓN EN TIEMPO REAL (Supabase Realtime)
+-- Permite recibir cambios en vivo de señalización WebRTC, salas y libreta de amigos
+-- ==============================================================================
+alter publication supabase_realtime add table public.rooms;
+alter publication supabase_realtime add table public.ice_candidates;
+alter publication supabase_realtime add table public.friends;
+alter publication supabase_realtime add table public.profiles;

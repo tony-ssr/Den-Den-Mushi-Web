@@ -90,3 +90,13 @@ $$ language plpgsql security definer;
 create or replace trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- ==============================================================================
+-- 7. CONFIGURACIÓN EN TIEMPO REAL (Supabase Realtime)
+-- Permite recibir cambios en vivo de señalización WebRTC, salas y libreta de amigos
+-- ==============================================================================
+alter publication supabase_realtime add table public.rooms;
+alter publication supabase_realtime add table public.ice_candidates;
+alter publication supabase_realtime add table public.friends;
+alter publication supabase_realtime add table public.profiles;
+
