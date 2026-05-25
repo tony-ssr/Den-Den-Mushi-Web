@@ -46,7 +46,7 @@ self.addEventListener('activate', (event) => {
   return self.clients.claim();
 });
 
-// Fetch Event - Cache First with Network Fallback
+// Fetch Event - Network First with Cache Fallback for dynamic updates
 self.addEventListener('fetch', (event) => {
   // Do not intercept Supabase API or WebRTC signaling requests
   if (
@@ -57,12 +57,9 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request).then((response) => {
-        // Cache newly fetched assets if applicable
+    fetch(event.request)
+      .then((response) => {
+        // Cache newly fetched assets if successful and valid
         if (response && response.status === 200 && response.type === 'basic') {
           const responseToCache = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -70,10 +67,18 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return response;
-      }).catch(() => {
-        // Offline fallback
-        return caches.match('/index.html');
-      });
-    })
+      })
+      .catch(() => {
+        // Fallback to cache if offline
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          // If offline and navigate mode (page refresh/access), serve index.html
+          if (event.request.mode === 'navigate') {
+            return caches.match('/index.html');
+          }
+        });
+      })
   );
 });

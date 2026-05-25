@@ -10,9 +10,7 @@ let currentMicSource = null;
 let helmetHighPass = null;
 let helmetBandPass = null;
 
-// Audio elements for sound effects
-const gachaSound = new Audio('/sounds/gacha.mp3');
-gachaSound.volume = 0.7;
+// Audio elements for sound effects are disabled
 
 /**
  * Initialize the Web Audio Context after user interaction to satisfy browser security policies
@@ -181,32 +179,22 @@ export function stopRemoteStream() {
 }
 
 /**
- * Sound FX: Play the Swipe-Up Gacha sound
+ * Sound FX: Play the Swipe-Up Gacha sound (Disabled)
  */
 export function playGachaSound() {
-  gachaSound.currentTime = 0;
-  gachaSound.play().catch(e => console.log('Interacción previa requerida para sonidos:', e));
+  // Disabled as requested
 }
 
 /**
- * Sound FX: Play the Den Den Mushi calling tone (purupuru.mp3)
+ * Sound FX: Play the Den Den Mushi calling tone (purupuru.mp3) (Disabled)
  */
 export function startRingtone() {
-  if (ringtoneAudio) return;
-  
-  ringtoneAudio = new Audio('/sounds/purupuru.mp3');
-  ringtoneAudio.loop = true;
-  ringtoneAudio.volume = 0.6;
-  ringtoneAudio.play().catch(e => console.log('El ringtone requiere interacción del usuario para reproducirse:', e));
+  // Disabled as requested
 }
 
 /**
- * Sound FX: Stop the Den Den Mushi calling tone
+ * Sound FX: Stop the Den Den Mushi calling tone (Disabled)
  */
 export function stopRingtone() {
-  if (ringtoneAudio) {
-    ringtoneAudio.pause();
-    ringtoneAudio.currentTime = 0;
-    ringtoneAudio = null;
-  }
+  // Disabled as requested
 }
