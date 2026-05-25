@@ -102,7 +102,22 @@ document.addEventListener('DOMContentLoaded', () => {
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js')
-      .then(reg => console.log('PWA Service Worker registrado con éxito:', reg.scope))
+      .then(reg => {
+        console.log('PWA Service Worker registrado con éxito:', reg.scope);
+        
+        // Listen for new service worker installation to force immediate reload and bypass cache
+        reg.onupdatefound = () => {
+          const installingWorker = reg.installing;
+          if (installingWorker) {
+            installingWorker.onstatechange = () => {
+              if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('Nueva versión del intercomunicador disponible. Recargando caché...');
+                window.location.reload();
+              }
+            };
+          }
+        };
+      })
       .catch(err => console.warn('Fallo al registrar PWA Service Worker:', err));
   }
 }
@@ -126,6 +141,11 @@ async function initApp() {
       } else {
         currentUser = null;
         currentProfile = null;
+        // Clean up active realtime channels on logout to prevent background callbacks
+        if (realtimeRoomsChannel) {
+          supabase.removeChannel(realtimeRoomsChannel);
+          realtimeRoomsChannel = null;
+        }
         setupAuthView();
       }
     } catch (authCycleError) {
