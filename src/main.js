@@ -44,6 +44,7 @@ let isPttTransmitting = false;
 let isLockHandsFreeMode = false;
 
 // DOM Selectors
+const loadingScreen = document.getElementById('loading-screen');
 const authScreen = document.getElementById('auth-screen');
 const dashboardScreen = document.getElementById('dashboard-screen');
 const roomScreen = document.getElementById('room-screen');
@@ -164,10 +165,12 @@ async function initApp() {
 
 // Router views switcher
 function showScreen(screenId) {
+  loadingScreen.classList.add('hidden');
   authScreen.classList.add('hidden');
   dashboardScreen.classList.add('hidden');
   roomScreen.classList.add('hidden');
   
+  if (screenId === 'loading') loadingScreen.classList.remove('hidden');
   if (screenId === 'auth') authScreen.classList.remove('hidden');
   if (screenId === 'dashboard') dashboardScreen.classList.remove('hidden');
   if (screenId === 'room') roomScreen.classList.remove('hidden');
