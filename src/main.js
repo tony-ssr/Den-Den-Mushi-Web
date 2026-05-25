@@ -153,6 +153,11 @@ async function initApp() {
       console.error('Error crítico en ciclo de autenticación:', authCycleError);
       alert('Error de inicialización de sesión: ' + (authCycleError.message || authCycleError));
       
+      // Force exit loading state and show login screen to prevent infinite hangs
+      currentUser = null;
+      currentProfile = null;
+      setupAuthView();
+      
       // Safety reset of the login submit button so it does not get stuck on 'Cargando...'
       const authSubmitBtn = document.getElementById('auth-submit-btn');
       if (authSubmitBtn) {
