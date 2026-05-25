@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Den Den Mushi Intercom</title>
+  
+  <!-- SEO & Social Meta Tags -->
+  <meta name="description" content="Intercomunicador VoIP P2P en tiempo real con reducción de ruido ambiental para motociclistas. Inspirado en Den Den Mushi.">
+  <meta name="theme-color" content="#0f172a">
+  
+  <!-- PWA Capabilities -->
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/images/dendenmushi/denden_activo.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/index.css">
+</head>
+<body class="h-full bg-slate-950 text-slate-100 flex flex-col antialiased select-none">
+
+  <!-- ==========================================================================
+       SCREEN 1: AUTHENTICATION SCREEN (LOGIN / REGISTER)
+       ========================================================================== -->
+  <main id="auth-screen" class="flex-1 flex flex-col justify-center items-center px-6 py-12 relative overflow-hidden">
+    <!-- Background Ambient Glow -->
+    <div class="absolute -top-40 -left-40 w-96 h-96 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
+    <div class="absolute -bottom-40 -right-40 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+    <div class="w-full max-w-md z-10">
+      <!-- Title & Branding -->
+      <div class="text-center mb-8">
+        <div class="inline-flex items-center justify-center p-4 bg-slate-900/80 border border-slate-800 rounded-3xl mb-4 shadow-xl">
+          <img src="/images/dendenmushi/denden_dormido.png" alt="Logo" class="w-20 h-20 object-contain">
+        </div>
+        <h1 class="text-4xl font-extrabold tracking-tight text-white font-outfit text-glow">
+          Den Den Mushi
+        </h1>
+        <p class="text-slate-400 mt-2 text-sm font-medium tracking-wide">
+          BUSTER CALL INTERCOM
+        </p>
+      </div>
+
+      <!-- Auth Form Card -->
+      <div class="glass-panel rounded-3xl p-8 shadow-2xl">
+        <h2 id="auth-title" class="text-2xl font-bold text-white mb-6 text-center font-outfit">
+          Iniciar Sesión
+        </h2>
+        
+        <form id="auth-form" class="space-y-5">
+          <!-- Username Field (Mandatory for registration, starts hidden) -->
+          <div id="username-field-container" class="hidden transition-all duration-300">
+            <label for="auth-username" class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+              Nombre de Usuario
+            </label>
+            <input type="text" id="auth-username" placeholder="Nombre único de caracol (mín. 3)"
+              class="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition font-inter text-sm">
+          </div>
+
+          <!-- Email Field -->
+          <div>
+            <label for="auth-email" class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+              Correo Electrónico
+            </label>
+            <input type="email" id="auth-email" required placeholder="correo@ejemplo.com"
+              class="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition font-inter text-sm">
+          </div>
+
+          <!-- Password Field -->
+          <div>
+            <label for="auth-password" class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+              Contraseña
+            </label>
+            <input type="password" id="auth-password" required placeholder="••••••••"
+              class="w-full bg-slate-900/60 border border-slate-700/50 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition font-inter text-sm">
+          </div>
+
+          <!-- Submit Button -->
+          <button type="submit" id="auth-submit-btn"
+            class="w-full bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-bold py-3.5 px-4 rounded-xl transition duration-300 shadow-lg shadow-sky-500/20 active:scale-[0.98]">
+            Ingresar
+          </button>
+        </form>
+
+        <!-- Toggle Auth Type -->
+        <div class="mt-6 text-center text-sm">
+          <span id="auth-toggle-msg" class="text-slate-400">¿No tienes cuenta?</span>
+          <button id="auth-toggle-btn" class="text-sky-400 hover:text-sky-300 font-semibold ml-1 cursor-pointer transition">
+            Crear Cuenta
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+
+  <!-- ==========================================================================
+       SCREEN 2: LIVE DASHBOARD SCREEN (ROOM LISTING & SOCIAL)
+       ========================================================================== -->
+  <main id="dashboard-screen" class="hidden flex-1 flex flex-col overflow-hidden max-w-6xl mx-auto w-full px-4 py-6">
+    <!-- Upper Navigation Dashboard Banner -->
+    <header class="flex justify-between items-center bg-slate-900/50 border border-slate-800 rounded-2xl p-4 mb-6 shadow-md">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center font-bold text-white font-outfit">
+          🐌
+        </div>
+        <div>
+          <h2 id="user-badge" class="font-bold text-slate-100 font-outfit text-sm md:text-base">Caracol Cargando...</h2>
+          <span class="text-xs text-sky-400 font-medium">Disponible</span>
+        </div>
+      </div>
+      <button id="logout-btn" class="p-2.5 rounded-xl bg-slate-800 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 transition" title="Cerrar Sesión">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+        </svg>
+      </button>
+    </header>
+
+    <div class="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-hidden">
+      <!-- COLUMN 1 & 2: Rooms and Creation -->
+      <section class="lg:col-span-2 flex flex-col space-y-6 overflow-hidden">
+        <!-- Live Rooms List -->
+        <div class="glass-panel rounded-3xl p-6 flex flex-col flex-1 overflow-hidden min-h-[350px]">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold font-outfit flex items-center gap-2">
+              <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+              Salas Activas en Vivo
+            </h3>
+            <span class="text-xs font-semibold px-2 py-1 bg-slate-800 rounded-lg text-slate-400">Realtime</span>
+          </div>
+
+          <!-- Rooms Container (Scrollable) -->
+          <div id="rooms-container" class="flex-1 overflow-y-auto space-y-3 pr-2">
+            <!-- Loading Indicator -->
+            <div class="flex flex-col items-center justify-center h-full text-slate-500 space-y-2">
+              <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-sky-500"></div>
+              <span class="text-xs">Sincronizando con el mar de caracoles...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Room Creation Form -->
+        <div class="glass-panel rounded-3xl p-6 shadow-lg">
+          <h3 class="text-lg font-bold font-outfit text-white mb-4">Crear Nueva Sala de Voz</h3>
+          <form id="create-room-form" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label for="room-code-input" class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Código de Sala</label>
+              <input type="text" id="room-code-input" required placeholder="Ej: ROVEX"
+                class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 font-inter text-sm">
+            </div>
+
+            <div>
+              <label for="room-type-select" class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Privacidad</label>
+              <select id="room-type-select"
+                class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-sky-500 font-inter text-sm cursor-pointer">
+                <option value="public">Pública (Cualquiera)</option>
+                <option value="password">Con Contraseña</option>
+                <option value="private">Privada (Sólo Amigos)</option>
+              </select>
+            </div>
+
+            <!-- Optional Password Container -->
+            <div id="room-password-container" class="hidden">
+              <label for="room-password-input" class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Contraseña</label>
+              <input type="password" id="room-password-input" placeholder="Contraseña de sala"
+                class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 font-inter text-sm">
+            </div>
+
+            <div class="flex items-end md:col-span-1">
+              <button type="submit" id="create-room-btn"
+                class="w-full bg-sky-500 hover:bg-sky-400 text-white font-bold py-2.5 px-4 rounded-xl shadow-lg transition active:scale-[0.98] cursor-pointer">
+                Crear Sala
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- COLUMN 3: Social & Friends System -->
+      <section class="glass-panel rounded-3xl p-6 flex flex-col overflow-hidden min-h-[400px]">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-xl font-bold font-outfit">Caracoles Amigos</h3>
+          <span class="text-[10px] font-bold bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full">Social</span>
+        </div>
+
+        <!-- Add Friend form -->
+        <div class="mb-5">
+          <form id="add-friend-form" class="relative">
+            <input type="text" id="friend-username-input" required placeholder="Buscar username..."
+              class="w-full bg-slate-900 border border-slate-800 rounded-xl pl-4 pr-12 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-inter text-sm">
+            <button type="submit" class="absolute right-1 top-1 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg transition" title="Enviar Solicitud">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </form>
+        </div>
+
+        <!-- Friends Container List -->
+        <div id="friends-container" class="flex-1 overflow-y-auto space-y-3 pr-1">
+          <!-- Will render list from JS -->
+          <div class="text-center py-8 text-slate-500 text-xs">
+            Aún no has agregado amigos. Búscalos arriba.
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+
+  <!-- ==========================================================================
+       SCREEN 3: ACTIVE ROOM SCREEN (DEN DEN MUSHI VOICE CALL)
+       ========================================================================== -->
+  <main id="room-screen" class="hidden flex-1 flex flex-col justify-between p-6 max-w-xl mx-auto w-full relative overflow-hidden">
+    <!-- Active Room Header -->
+    <header class="flex justify-between items-center bg-slate-900/60 border border-slate-800 rounded-2xl p-4 shadow-lg z-10">
+      <div class="flex items-center gap-3">
+        <button id="leave-room-btn" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+        </button>
+        <div>
+          <h2 id="active-room-title" class="font-extrabold font-outfit text-white tracking-wider">SALA: -</h2>
+          <span id="call-duration" class="text-xs text-slate-400 font-inter">Caracol de señalización</span>
+        </div>
+      </div>
+      <!-- Encryption / VoIP Shield Badge -->
+      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm shadow-emerald-500/5">
+        <svg class="mr-1 h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M2.166 4.9L10 1.154l7.834 3.746A1 1 0 0118.5 5.8v4.962a9 9 0 01-5.185 8.167L10 20l-3.315-1.23A9 9 0 011.5 10.762V5.8a1 1 0 01.666-.9zM10 4.257L4.5 6.883v3.879a7.001 7.001 0 004.148 6.37L10 17.653l1.352-.521a7.001 7.001 0 004.148-6.37V6.883L10 4.257z" clip-rule="evenodd" />
+        </svg>
+        P2P Secure
+      </span>
+    </header>
+
+    <!-- Main Den Den Mushi Graphical Core -->
+    <section class="my-auto flex flex-col items-center justify-center z-10 relative">
+      <!-- Glow Ring Behind Mushi -->
+      <div id="denden-glow-ring" class="absolute w-64 h-64 rounded-full bg-sky-500/5 border border-sky-500/20 blur-xl transition-all duration-500"></div>
+
+      <!-- Speaks Waves -->
+      <div id="denden-speak-waves" class="absolute hidden flex items-center justify-center">
+        <div class="absolute w-72 h-72 rounded-full border border-sky-400/40 animate-ping opacity-75"></div>
+        <div class="absolute w-80 h-80 rounded-full border border-sky-400/20 animate-ping opacity-50"></div>
+      </div>
+
+      <!-- Den Den Mushi Graphic Frame -->
+      <div class="relative w-64 h-64 flex items-center justify-center mb-6">
+        <img id="denden-mushi-img" src="/images/dendenmushi/denden_dormido.png" alt="Den Den Mushi" 
+          class="w-full h-full object-contain filter drop-shadow-[0_15px_15px_rgba(0,0,0,0.6)] select-none pointer-events-none transition-transform duration-300">
+      </div>
+
+      <!-- Active Connection / Transmission Status badge -->
+      <div class="text-center space-y-2">
+        <div id="denden-status-badge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs font-bold font-inter text-slate-300">
+          <span id="status-indicator-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+          <span id="denden-status-text">ESPERANDO CONEXIÓN...</span>
+        </div>
+        <p id="denden-instructions" class="text-xs text-slate-400 font-inter max-w-[280px] mx-auto leading-relaxed">
+          Iniciando enlaces del caracol telefónico...
+        </p>
+      </div>
+    </section>
+
+    <!-- Intercom Action UI & Gestures Container -->
+    <section class="flex flex-col space-y-6 z-10">
+      <!-- PTT / Hands-Free Interactive Control Center -->
+      <div class="flex flex-col items-center justify-center">
+        <!-- Interactive PTT Radial Button -->
+        <div class="relative flex flex-col items-center justify-center select-none">
+          <!-- Gesture visual swipe-up path -->
+          <div class="absolute -top-12 flex flex-col items-center animate-bounce text-[10px] text-sky-400/50 uppercase tracking-widest font-bold">
+            <span>Desliza arriba para Trabar</span>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 11l7-7 7 7M5 19l7-7 7 7" />
+            </svg>
+          </div>
+
+          <!-- The main tactile button -->
+          <button id="ptt-trigger-btn" class="w-28 h-28 rounded-full bg-gradient-to-tr from-slate-800 to-slate-950 border border-slate-700/60 flex flex-col items-center justify-center shadow-2xl active:scale-95 transition-all duration-150 cursor-pointer touch-none z-20">
+            <span class="text-2xl">🎙️</span>
+            <span id="ptt-button-label" class="text-[9px] font-black text-slate-400 tracking-wider uppercase mt-1">PRESIONAR</span>
+            <span class="text-[7px] text-slate-500 tracking-widest uppercase mt-0.5">PARA HABLAR</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Active Room Participants List Card -->
+      <div class="glass-card rounded-2xl p-4">
+        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 text-center font-inter">Enlaces de Copilotos</h4>
+        <div id="participants-list" class="space-y-3">
+          <!-- Render dynamically in JS. E.g.: -->
+          <!-- Host: Username (Active) -->
+          <!-- Guest: Username (Connecting...) (Friend dynamic action button) -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Hidden native elements for WebRTC playback -->
+    <div id="audio-container" class="hidden"></div>
+  </main>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

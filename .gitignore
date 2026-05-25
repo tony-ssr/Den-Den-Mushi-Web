@@ -1,0 +1,41 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Compiler outputs
+dist/
+tmp/
+out/
+.vercel/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Local env files (Do NOT commit keys to repo!)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Temp test files
+test_supabase.js
