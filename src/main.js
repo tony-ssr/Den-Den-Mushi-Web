@@ -522,13 +522,16 @@ async function updateRoomsList() {
             </p>
           </div>
           
-          <div>
+          <div class="flex items-center gap-2">
             ${isHost ? `
-              <button onclick="window.handleDeleteRoom('${room.id}')" class="px-3.5 py-1.5 rounded-xl bg-rose-950/30 hover:bg-rose-900/60 border border-rose-900/40 text-rose-300 text-xs font-bold transition">
+              <button onclick="window.handleJoinRoom('${room.id}', '${room.room_type}', '${room.room_password || ''}')" class="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white text-xs font-bold transition shadow-md shadow-sky-500/10 cursor-pointer">
+                Enlazar
+              </button>
+              <button onclick="window.handleDeleteRoom('${room.id}')" class="px-3.5 py-1.5 rounded-xl bg-rose-950/30 hover:bg-rose-900/60 border border-rose-900/40 text-rose-300 text-xs font-bold transition cursor-pointer">
                 Eliminar
               </button>
             ` : `
-              <button onclick="window.handleJoinRoom('${room.id}', '${room.room_type}', '${room.room_password || ''}')" class="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white text-xs font-bold transition shadow-md shadow-sky-500/10">
+              <button onclick="window.handleJoinRoom('${room.id}', '${room.room_type}', '${room.room_password || ''}')" class="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white text-xs font-bold transition shadow-md shadow-sky-500/10 cursor-pointer">
                 Enlazar
               </button>
             `}
@@ -704,7 +707,7 @@ async function runSignalingForActiveRoom() {
 
 async function enterRoom(room, isHost) {
   activeRoom = room;
-  isHostOfActiveRoom = isHost;
+  isHostOfActiveRoom = isHost || (room.host_id === currentUser.id);
   activeRoomParticipants = [];
   
   // Show Voice Call Screen
