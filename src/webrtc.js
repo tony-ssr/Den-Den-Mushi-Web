@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { setLocalMicMuteState } from './audio';
 
 let peers = {}; // userId -> { pc, remoteStream }
 let localStreamRef = null;
@@ -330,10 +331,18 @@ function removePeer(peerId) {
 export function setLocalAudioTransmission(localStream, isTransmitting) {
   if (!localStream) return;
 
+  // CRITICAL: We keep the hardware track.enabled = true continuously!
+  // Toggling track.enabled = false causes Chrome/OS to release/suspend background mic capture.
+  // Instead, we keep the track actively recording digital silence and toggle gain digitally.
   localStream.getAudioTracks().forEach(track => {
-    track.enabled = isTransmitting;
-    console.log(`Micrófono local ${track.label}: ${isTransmitting ? 'TRANSMITIENDO' : 'MUTED (PTT)'}`);
+    if (!track.enabled) {
+      track.enabled = true;
+    }
   });
+  
+  // Digitally control mic audio volume (mute = gain 0.0, transmit = gain 1.2)
+  setLocalMicMuteState(!isTransmitting);
+  console.log(`Micrófono local MESH: ${isTransmitting ? 'TRANSMITIENDO VOZ (Ganancia 100%)' : 'SILENCIADO DIGITALMENTE (En segundo plano/PTT)'}`);
 }
 
 /**

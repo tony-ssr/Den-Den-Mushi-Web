@@ -9,6 +9,7 @@ let ringtoneAudio = null;
 let currentMicSource = null;
 let helmetHighPass = null;
 let helmetBandPass = null;
+let localTransmitGainNode = null; // Node to control digital local mute without disabling tracks
 let remoteGainNodes = {}; // peerId -> GainNode
 let masterGainNode = null;
 
@@ -73,6 +74,7 @@ export async function initMicrophone() {
     // Filter C: Dynamic Gain Node to control local gain prior to transmission
     const transmitGain = ctx.createGain();
     transmitGain.gain.value = 1.2; // Slightly boost speech signal
+    localTransmitGainNode = transmitGain;
 
     // Connect nodes: Source -> Highpass -> Bandpass -> Gain
     currentMicSource.connect(helmetHighPass);
@@ -105,8 +107,23 @@ export function stopMicrophone() {
     currentMicSource.disconnect();
     currentMicSource = null;
   }
+  localTransmitGainNode = null;
   filteredMicStream = null;
   console.log('Micrófono y filtros detenidos.');
+}
+
+/**
+ * Digitally control the microphone transmission state by transitioning gain nodes,
+ * avoiding hardware track deactivation which triggers mobile OS background mic suspension.
+ */
+export function setLocalMicMuteState(isMuted) {
+  if (localTransmitGainNode) {
+    const ctx = getAudioContext();
+    const targetGain = isMuted ? 0.0 : 1.2;
+    // Rapid 10ms smooth gain exponential ramp to avoid speaker clicks
+    localTransmitGainNode.gain.setTargetAtTime(targetGain, ctx.currentTime, 0.01);
+    console.log(`Audio: Ganancia de transmisión local ajustada a ${targetGain} (Muted: ${isMuted})`);
+  }
 }
 
 /**
