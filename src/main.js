@@ -155,6 +155,9 @@ async function requestNotificationPermission() {
 
 function updatePwaNotificationMicState(micState) {
   if (!activeRoom) return;
+  const isMicActive = micState === 'active';
+
+  // 1. Update PWA Call Notification in system bar
   if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
     navigator.serviceWorker.ready.then(reg => {
       if (navigator.serviceWorker.controller) {
@@ -164,6 +167,28 @@ function updatePwaNotificationMicState(micState) {
           micState: micState
         });
       }
+    });
+  }
+
+  // 2. Update Lock Screen widgets and physical headphones button commands via Media Session API
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: 'Den Den Mushi Intercom',
+      artist: `Sala: ${activeRoom.room_code}`,
+      album: isMicActive ? '🔴 TRANSMITIENDO VOZ' : '🎙️ EN ESPERA (MUTED)',
+      artwork: [
+        { src: '/images/dendenmushi/denden_activo.png', sizes: '512x512', type: 'image/png' }
+      ]
+    });
+
+    // Set lock screen multimedia buttons to control continuous lock mode hands-free
+    navigator.mediaSession.setActionHandler('play', () => {
+      console.log('Lockscreen MediaSession: Play presionado, abriendo micrófono...');
+      activateLockMode();
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      console.log('Lockscreen MediaSession: Pause presionado, silenciando micrófono...');
+      disableLockMode();
     });
   }
 }
@@ -625,18 +650,8 @@ async function enterRoom(room, isHost) {
     
     await runSignalingForActiveRoom();
 
-    // Show Call Notification in PWA
-    if ('Notification' in window && Notification.permission === 'granted') {
-      navigator.serviceWorker.ready.then(reg => {
-        if (navigator.serviceWorker.controller) {
-          navigator.serviceWorker.controller.postMessage({
-            type: 'SHOW_CALL_NOTIFICATION',
-            roomCode: room.room_code,
-            micState: 'muted'
-          });
-        }
-      });
-    }
+    // Show Call Notification and lock screen widget in PWA
+    updatePwaNotificationMicState('muted');
 
     // Render active participants
     await updateParticipantsUI();
