@@ -112,15 +112,16 @@ export function stopMicrophone() {
  * Routes through the Web Audio graph to a low-priority VoIP node, which ensures
  * iOS and Android mix the audio with background music (Spotify/YouTube) instead of pausing.
  */
-export function playRemoteStream(remoteStream) {
+export function playRemoteStream(remoteStream, peerId = 'default') {
   try {
     const ctx = getAudioContext();
+    const elementId = `webrtc-remote-audio-${peerId}`;
     
     // Create an HTML5 Audio element for background playback
-    let audioElement = document.getElementById('webrtc-remote-audio');
+    let audioElement = document.getElementById(elementId);
     if (!audioElement) {
       audioElement = document.createElement('audio');
-      audioElement.id = 'webrtc-remote-audio';
+      audioElement.id = elementId;
       audioElement.style.display = 'none';
       audioElement.autoplay = true;
       audioElement.controls = false;
@@ -160,7 +161,7 @@ export function playRemoteStream(remoteStream) {
       console.warn('Autoplay bloqueado en el elemento de audio, sonará a través del AudioContext:', e);
     });
 
-    console.log('Flujo de audio remoto conectado exitosamente al pipeline de baja prioridad.');
+    console.log(`Flujo de audio remoto para ${peerId} conectado exitosamente.`);
   } catch (err) {
     console.error('Error al reproducir stream de audio remoto:', err);
   }
@@ -169,13 +170,26 @@ export function playRemoteStream(remoteStream) {
 /**
  * Stop remote stream playback
  */
-export function stopRemoteStream() {
-  const audioElement = document.getElementById('webrtc-remote-audio');
-  if (audioElement) {
-    audioElement.srcObject = null;
-    audioElement.pause();
+export function stopRemoteStream(peerId) {
+  if (peerId) {
+    const elementId = `webrtc-remote-audio-${peerId}`;
+    const audioElement = document.getElementById(elementId);
+    if (audioElement) {
+      audioElement.srcObject = null;
+      audioElement.pause();
+      audioElement.remove();
+    }
+    console.log(`Audio remoto de WebRTC para peer ${peerId} detenido.`);
+  } else {
+    // Select all audio elements starting with webrtc-remote-audio-
+    const elements = document.querySelectorAll('audio[id^="webrtc-remote-audio-"]');
+    elements.forEach(audioElement => {
+      audioElement.srcObject = null;
+      audioElement.pause();
+      audioElement.remove();
+    });
+    console.log('Todos los flujos de audio remoto de WebRTC detenidos.');
   }
-  console.log('Audio remoto de WebRTC detenido.');
 }
 
 /**

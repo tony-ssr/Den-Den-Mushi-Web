@@ -1,10 +1,12 @@
-import { supabase, updateRoomSignaling, sendIceCandidate, clearIceCandidates } from './supabase';
+import { supabase } from './supabase';
 
-let pc = null;
-let roomSubscription = null;
-let candidatesSubscription = null;
-let remoteVolumeAnalyser = null;
-let remoteVolumeTimer = null;
+let peers = {}; // userId -> { pc, remoteStream }
+let localStreamRef = null;
+let activeChannel = null;
+let dbChannel = null;
+let callbacksRef = null;
+let currentUserId = null;
+let currentRoomId = null;
 
 const rtcConfig = {
   iceServers: [
@@ -15,315 +17,322 @@ const rtcConfig = {
 };
 
 /**
- * Get the current peer connection instance
+ * Get active peer connections dictionary (useful for debugging/states)
  */
-export function getPeerConnection() {
-  return pc;
+export function getPeers() {
+  return peers;
 }
 
 /**
- * Initialize WebRTC Peer Connection and set up signaling listeners using Supabase Realtime
+ * Get active peer connection instance (for backward compatibility, returns the first active peer)
+ */
+export function getPeerConnection() {
+  const keys = Object.keys(peers);
+  return keys.length > 0 ? peers[keys[0]].pc : null;
+}
+
+/**
+ * Initialize WebRTC Peer Connection and set up MESH signaling using Supabase Realtime Broadcast & Presence
  */
 export async function startSignaling(
   roomId,
   userId,
-  isHost,
+  isHost, // keeps roles in sync
   localStream,
   callbacks = {}
 ) {
+  currentRoomId = roomId;
+  currentUserId = userId;
+  localStreamRef = localStream;
+  callbacksRef = callbacks;
+
   const {
     onRemoteStream,
+    onRemoteStreamRemoved,
     onConnectionState,
-    onRemoteSpeaking, // fires with true/false based on speaking volume
     onRoomUpdate,
     onRoomDeleted,
     onError
   } = callbacks;
 
   try {
-    console.log(`Iniciando señalización WebRTC como ${isHost ? 'Host' : 'Invitado'} para sala ${roomId}`);
+    console.log(`Iniciando señalización MESH WebRTC para sala ${roomId} y usuario ${userId}`);
 
-    // Create RTCPeerConnection
-    pc = new RTCPeerConnection(rtcConfig);
-
-    // Add local stream tracks to WebRTC peer connection
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
-      });
-      console.log('Tracks locales agregados al PeerConnection');
-    }
-
-    // Set up local ICE candidate gathering
-    pc.onicecandidate = async (event) => {
-      if (event.candidate) {
-        console.log('Nuevo candidato ICE generado localmente');
-        try {
-          await sendIceCandidate(roomId, userId, event.candidate.toJSON());
-        } catch (err) {
-          console.error('Error al enviar candidato ICE:', err);
+    // Create Supabase Realtime Channel for active MESH voice signaling
+    activeChannel = supabase.channel(`room_call_${roomId}`, {
+      config: {
+        presence: {
+          key: userId
         }
       }
-    };
+    });
 
-    // Listen to remote tracks
-    pc.ontrack = (event) => {
-      console.log('Track remoto recibido:', event.streams);
-      if (onRemoteStream && event.streams[0]) {
-        onRemoteStream(event.streams[0]);
-        setupRemoteVolumeDetection(event.streams[0], onRemoteSpeaking);
-      }
-    };
-
-    // Track state changes
-    pc.onconnectionstatechange = () => {
-      console.log('Cambio de estado de conexión WebRTC:', pc.connectionState);
-      if (onConnectionState) {
-        onConnectionState(pc.connectionState);
-      }
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      console.log('Cambio de estado ICE:', pc.iceConnectionState);
-      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-        console.warn('Conexión perdida o fallida, reintentando...');
-      }
-    };
-
-    // =========================================================================
-    // 1. SIGNALLING VIA SUPABASE REALTIME (SDP OFFER / ANSWER)
-    // =========================================================================
-    
-    // Subscribe to changes in the rooms table
-    roomSubscription = supabase
-      .channel(`room_signals_${roomId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
-        async (payload) => {
-          if (payload.eventType === 'DELETE') {
-            console.log('La sala ha sido eliminada de la base de datos.');
-            if (onRoomDeleted) {
-              await onRoomDeleted();
-            }
-            return;
-          }
-
-          const room = payload.new;
-          console.log('Sala actualizada en base de datos:', room);
-
-          if (onRoomUpdate) {
-            await onRoomUpdate(room);
-          }
-
-          if (isHost) {
-            // A. Host listens to guest joining and answers
-            if (room.guest_id && !pc.localDescription) {
-              console.log('Invitado detectado. Generando oferta SDP...');
-              await createAndSendOffer(roomId);
-            } else if (room.sdp_answer && pc.signalingState === 'have-local-offer') {
-              console.log('Respuesta SDP recibida de invitado. Estableciendo descripción remota...');
-              await pc.setRemoteDescription(new RTCSessionDescription(room.sdp_answer));
-            }
-          } else {
-            // B. Guest listens to the offer
-            if (room.sdp_offer && pc.signalingState === 'stable') {
-              console.log('Oferta SDP recibida del Host. Estableciendo descripción remota...');
-              await pc.setRemoteDescription(new RTCSessionDescription(room.sdp_offer));
-              console.log('Generando respuesta SDP...');
-              await createAndSendAnswer(roomId);
-            }
-          }
-        }
-      )
-      .subscribe((status) => {
-        console.log(`Estado de suscripción de sala: ${status}`);
-        
-        // If Guest joins, triggers checking if room already has offer
-        if (!isHost && status === 'SUBSCRIBED') {
-          checkExistingOffer(roomId);
-        }
+    // 1. Listen to Presence Synchronization
+    activeChannel
+      .on('presence', { event: 'sync' }, () => {
+        const presenceState = activeChannel.presenceState();
+        handlePresenceSync(presenceState);
+      })
+      .on('presence', { event: 'join', key: '*' }, ({ newPresences }) => {
+        console.log('Nuevos usuarios detectados en presencia:', newPresences);
+      })
+      .on('presence', { event: 'leave', key: '*' }, ({ leftPresences }) => {
+        console.log('Usuarios salieron de presencia:', leftPresences);
       });
 
-    // =========================================================================
-    // 2. SIGNALLING ICE CANDIDATES VIA SUPABASE
-    // =========================================================================
-    
-    // Subscribe to ice_candidates insertions
-    candidatesSubscription = supabase
-      .channel(`ice_candidates_${roomId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'ice_candidates', filter: `room_id=eq.${roomId}` },
-        async (payload) => {
-          const candidateData = payload.new;
-          // Only add candidates sent by the peer
-          if (candidateData.sender_id !== userId) {
-            console.log('Candidato ICE remoto recibido');
-            try {
-              if (pc.remoteDescription) {
-                await pc.addIceCandidate(new RTCIceCandidate(candidateData.candidate));
-              } else {
-                // If remote description is not set yet, store it temporarily
-                console.log('Guardando candidato ICE para cuando esté lista la descripción remota');
-                if (!pc.pendingCandidates) pc.pendingCandidates = [];
-                pc.pendingCandidates.push(candidateData.candidate);
+    // 2. Listen to incoming Broadcast Signaling (SDP Offers/Answers & ICE Candidates)
+    activeChannel.on('broadcast', { event: 'signal' }, async ({ payload }) => {
+      // Only process signals intended for me
+      if (payload.target_id !== userId) return;
+
+      const senderId = payload.sender_id;
+      console.log(`Señal MESH recibida de ${senderId}:`, payload.sdp ? payload.sdp.type : 'ICE');
+
+      // Create peer connection if not already created
+      let peer = peers[senderId];
+      if (!peer) {
+        peer = await createPeerConnection(senderId);
+      }
+
+      const pc = peer.pc;
+
+      if (payload.sdp) {
+        const sdp = payload.sdp;
+        if (sdp.type === 'offer') {
+          console.log(`Oferta SDP recibida de ${senderId}. Estableciendo descripción remota...`);
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          
+          console.log(`Creando respuesta SDP para ${senderId}...`);
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          // Broadcast answer back to sender
+          activeChannel.send({
+            type: 'broadcast',
+            event: 'signal',
+            payload: {
+              sender_id: userId,
+              target_id: senderId,
+              sdp: answer
+            }
+          });
+
+          // Add any pending candidates
+          if (pc.pendingCandidates) {
+            console.log(`Agregando ${pc.pendingCandidates.length} candidatos ICE guardados para ${senderId}`);
+            for (const cand of pc.pendingCandidates) {
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(cand));
+              } catch (e) {
+                console.error('Error al agregar candidato ICE guardado:', e);
               }
-            } catch (err) {
-              console.error('Error al agregar candidato ICE:', err);
             }
+            pc.pendingCandidates = [];
+          }
+        } else if (sdp.type === 'answer') {
+          console.log(`Respuesta SDP recibida de ${senderId}. Estableciendo descripción remota...`);
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        }
+      } else if (payload.ice) {
+        try {
+          if (pc.remoteDescription) {
+            await pc.addIceCandidate(new RTCIceCandidate(payload.ice));
+          } else {
+            if (!pc.pendingCandidates) pc.pendingCandidates = [];
+            pc.pendingCandidates.push(payload.ice);
+          }
+        } catch (err) {
+          console.error(`Error al agregar candidato ICE para ${senderId}:`, err);
+        }
+      }
+    });
+
+    // 3. Listen to database DELETES on the room
+    dbChannel = supabase
+      .channel(`room_db_delete_${roomId}`)
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
+        async () => {
+          console.log('La sala ha sido eliminada de la base de datos por el host.');
+          if (onRoomDeleted) {
+            await onRoomDeleted();
           }
         }
       )
       .subscribe();
 
-    // If host, check if guest is already there (e.g. page refreshed)
-    if (isHost) {
-      const { data: room } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('id', roomId)
-        .single();
-      if (room && room.guest_id) {
-        console.log('Invitado ya presente. Generando oferta inicial...');
-        await createAndSendOffer(roomId);
+    // Subscribe to voice channel and track presence metadata
+    activeChannel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('¡Canal MESH en vivo suscrito con éxito!');
+        
+        // Retrieve local profile username from window/main state or default
+        const localUsername = window.currentUserUsername || 'Rider';
+        await activeChannel.track({
+          userId: userId,
+          username: localUsername,
+          isHost: isHost,
+          joinedAt: new Date().toISOString()
+        });
       }
-    }
+    });
 
   } catch (err) {
-    console.error('Error al iniciar WebRTC:', err);
+    console.error('Error al inicializar señalización MESH WebRTC:', err);
     if (onError) onError(err);
   }
 }
 
 /**
- * Sets up an AnalyserNode to detect if the remote user is actively speaking
+ * Handle active Presence synchronizations
  */
-function setupRemoteVolumeDetection(stream, onRemoteSpeaking) {
-  if (!onRemoteSpeaking) return;
+async function handlePresenceSync(presenceState) {
+  if (!presenceState) return;
 
-  try {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    const ctx = new AudioContextClass();
-    const source = ctx.createMediaStreamSource(stream);
-    
-    remoteVolumeAnalyser = ctx.createAnalyser();
-    remoteVolumeAnalyser.fftSize = 256;
-    
-    source.connect(remoteVolumeAnalyser);
-
-    const bufferLength = remoteVolumeAnalyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    
-    let isSpeaking = false;
-    
-    const checkVolume = () => {
-      if (!pc || pc.connectionState === 'closed') {
-        ctx.close();
-        return;
-      }
-      
-      remoteVolumeAnalyser.getByteFrequencyData(dataArray);
-      
-      // Calculate average volume amplitude
-      let total = 0;
-      for (let i = 0; i < bufferLength; i++) {
-        total += dataArray[i];
-      }
-      const average = total / bufferLength;
-
-      // Speech threshold (~12 out of 255 represents audible signal)
-      const speakingNow = average > 12;
-      
-      if (speakingNow !== isSpeaking) {
-        isSpeaking = speakingNow;
-        onRemoteSpeaking(isSpeaking);
-      }
-      
-      remoteVolumeTimer = requestAnimationFrame(checkVolume);
-    };
-    
-    checkVolume();
-  } catch (err) {
-    console.warn('No se pudo inicializar la detección de habla remota:', err);
-  }
-}
-
-/**
- * Check if the host has already placed an offer (useful on join/reconnection)
- */
-async function checkExistingOffer(roomId) {
-  try {
-    const { data: room } = await supabase
-      .from('rooms')
-      .select('sdp_offer')
-      .eq('id', roomId)
-      .single();
-      
-    if (room && room.sdp_offer && pc && pc.signalingState === 'stable') {
-      console.log('Oferta existente encontrada al conectar. Configurando...');
-      await pc.setRemoteDescription(new RTCSessionDescription(room.sdp_offer));
-      await createAndSendAnswer(roomId);
+  // Extract all connected user profiles in the presence list
+  const activePresences = [];
+  Object.values(presenceState).forEach(list => {
+    if (list && list[0]) {
+      activePresences.push(list[0]);
     }
-  } catch (err) {
-    console.error('Error al verificar oferta existente:', err);
+  });
+
+  console.log('Presencia MESH sincronizada. Conectados:', activePresences.length);
+
+  const activeUserIds = activePresences.map(p => p.userId);
+
+  // 1. Establish connection to newly joined peers
+  for (const presence of activePresences) {
+    const otherUserId = presence.userId;
+    if (otherUserId === currentUserId) continue;
+
+    // Create connection if it doesn't exist
+    if (!peers[otherUserId]) {
+      const peer = await createPeerConnection(otherUserId);
+      const pc = peer.pc;
+
+      // Determine Offer/Answer roles. Smallest UUID creates and sends SDP offer!
+      if (currentUserId < otherUserId) {
+        console.log(`[MESH ROLE] Soy iniciador para peer ${otherUserId}. Generando oferta...`);
+        const offer = await pc.createOffer({ offerToReceiveAudio: true });
+        await pc.setLocalDescription(offer);
+
+        activeChannel.send({
+          type: 'broadcast',
+          event: 'signal',
+          payload: {
+            sender_id: currentUserId,
+            target_id: otherUserId,
+            sdp: offer
+          }
+        });
+      } else {
+        console.log(`[MESH ROLE] Soy receptor para peer ${otherUserId}. Esperando oferta...`);
+      }
+    }
+  }
+
+  // 2. Remove peers who have left the room
+  for (const peerId of Object.keys(peers)) {
+    if (!activeUserIds.includes(peerId)) {
+      console.log(`El peer ${peerId} ha salido. Removiendo conexión...`);
+      removePeer(peerId);
+    }
+  }
+
+  // 3. Fire room list updates so the UI reflects all participants in real time
+  if (callbacksRef && callbacksRef.onRoomUpdate) {
+    callbacksRef.onRoomUpdate(activePresences);
   }
 }
 
 /**
- * Creates SDP Offer and uploads it to Supabase
+ * Create RTCPeerConnection for a specific remote peer ID
  */
-async function createAndSendOffer(roomId) {
-  if (!pc) return;
-  try {
-    const offer = await pc.createOffer({
-      offerToReceiveAudio: true
+async function createPeerConnection(targetUserId) {
+  console.log(`Estableciendo RTCPeerConnection para peer: ${targetUserId}`);
+
+  const pc = new RTCPeerConnection(rtcConfig);
+
+  // Store in connection dictionary
+  peers[targetUserId] = { pc, remoteStream: null };
+
+  // Add local media stream
+  if (localStreamRef) {
+    localStreamRef.getTracks().forEach(track => {
+      pc.addTrack(track, localStreamRef);
     });
-    await pc.setLocalDescription(offer);
-    await updateRoomSignaling(roomId, 'sdp_offer', offer);
-    console.log('Oferta SDP enviada con éxito.');
-  } catch (err) {
-    console.error('Error al crear oferta SDP:', err);
   }
-}
 
-/**
- * Creates SDP Answer and uploads it to Supabase
- */
-async function createAndSendAnswer(roomId) {
-  if (!pc) return;
-  try {
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    await updateRoomSignaling(roomId, 'sdp_answer', answer);
-    console.log('Respuesta SDP enviada con éxito.');
-
-    // Add any pending ICE candidates that were received prior to setting remote description
-    if (pc.pendingCandidates && pc.pendingCandidates.length > 0) {
-      console.log(`Agregando ${pc.pendingCandidates.length} candidatos ICE pendientes`);
-      for (const cand of pc.pendingCandidates) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(cand));
-        } catch (err) {
-          console.error('Error al agregar candidato pendiente:', err);
+  // Gather local ICE candidates and broadcast to target peer
+  pc.onicecandidate = (event) => {
+    if (event.candidate && activeChannel) {
+      activeChannel.send({
+        type: 'broadcast',
+        event: 'signal',
+        payload: {
+          sender_id: currentUserId,
+          target_id: targetUserId,
+          ice: event.candidate.toJSON()
         }
-      }
-      pc.pendingCandidates = [];
+      });
     }
-  } catch (err) {
-    console.error('Error al crear respuesta SDP:', err);
+  };
+
+  // Receive remote streams
+  pc.ontrack = (event) => {
+    console.log(`Recibida pista de voz remota de peer ${targetUserId}`);
+    if (event.streams[0]) {
+      peers[targetUserId].remoteStream = event.streams[0];
+      if (callbacksRef && callbacksRef.onRemoteStream) {
+        callbacksRef.onRemoteStream(event.streams[0], targetUserId);
+      }
+    }
+  };
+
+  // Track connection states
+  pc.onconnectionstatechange = () => {
+    console.log(`Estado de enlace con ${targetUserId}: ${pc.connectionState}`);
+    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      removePeer(targetUserId);
+    }
+  };
+
+  return peers[targetUserId];
+}
+
+/**
+ * Stop and remove a peer connection
+ */
+function removePeer(peerId) {
+  const peer = peers[peerId];
+  if (peer) {
+    try {
+      peer.pc.close();
+    } catch (e) {
+      console.warn('Error al cerrar peer connection:', e);
+    }
+    
+    // Stop their remote audio playback element
+    if (callbacksRef && callbacksRef.onRemoteStreamRemoved) {
+      callbacksRef.onRemoteStreamRemoved(peerId);
+    }
+
+    delete peers[peerId];
+    console.log(`Conexión con peer ${peerId} removida.`);
   }
 }
 
 /**
- * Set transmission state of the mic. Mutes when PTT is released, unmutes when PTT is pressed.
+ * Set PTT transmission state for all active peer connections in the mesh
  */
 export function setLocalAudioTransmission(localStream, isTransmitting) {
   if (!localStream) return;
-  
+
   localStream.getAudioTracks().forEach(track => {
     track.enabled = isTransmitting;
-    console.log(`Pista de micrófono local ${track.label}: ${isTransmitting ? 'TRANSMITIENDO' : 'MUTED (PTT)'}`);
+    console.log(`Micrófono local ${track.label}: ${isTransmitting ? 'TRANSMITIENDO' : 'MUTED (PTT)'}`);
   });
 }
 
@@ -331,33 +340,25 @@ export function setLocalAudioTransmission(localStream, isTransmitting) {
  * Cleanup and terminate connection and channel subscriptions
  */
 export async function closeConnection(roomId) {
-  console.log('Cerrando conexión WebRTC y limpiando recursos...');
-  
-  if (roomSubscription) {
-    supabase.removeChannel(roomSubscription);
-    roomSubscription = null;
-  }
-  
-  if (candidatesSubscription) {
-    supabase.removeChannel(candidatesSubscription);
-    candidatesSubscription = null;
+  console.log('Cerrando todas las conexiones MESH y liberando canales...');
+
+  // 1. Unsubscribe from Supabase realtime channels
+  if (activeChannel) {
+    supabase.removeChannel(activeChannel);
+    activeChannel = null;
   }
 
-  if (remoteVolumeTimer) {
-    cancelAnimationFrame(remoteVolumeTimer);
-    remoteVolumeTimer = null;
-  }
-  
-  if (pc) {
-    pc.close();
-    pc = null;
+  if (dbChannel) {
+    supabase.removeChannel(dbChannel);
+    dbChannel = null;
   }
 
-  if (roomId) {
-    try {
-      await clearIceCandidates(roomId);
-    } catch (e) {
-      console.log('Error al limpiar candidatos ICE en DB:', e);
-    }
-  }
+  // 2. Close all active peer connections in the mesh
+  Object.keys(peers).forEach(peerId => {
+    removePeer(peerId);
+  });
+  
+  peers = {};
+  localStreamRef = null;
+  callbacksRef = null;
 }

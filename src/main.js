@@ -39,6 +39,7 @@ let activeRoom = null;
 let isHostOfActiveRoom = false;
 let localAudioStream = null;
 let realtimeRoomsChannel = null;
+let activeRoomParticipants = [];
 
 // PTT and Swipe Gesture States
 let startY = 0;
@@ -120,8 +121,33 @@ function registerServiceWorker() {
             };
           }
         };
+
+        // Listen for message events from service worker (PWA notification command clicks)
+        navigator.serviceWorker.addEventListener('message', async (event) => {
+          const data = event.data;
+          if (data && data.type === 'NOTIFICATION_ACTION') {
+            console.log('Comando de notificación PWA recibido:', data.action);
+            if (data.action === 'mute') {
+              disableLockMode();
+            } else if (data.action === 'handsfree') {
+              activateLockMode();
+            } else if (data.action === 'exit') {
+              await exitActiveRoom();
+            }
+          }
+        });
       })
       .catch(err => console.warn('Fallo al registrar PWA Service Worker:', err));
+  }
+}
+
+async function requestNotificationPermission() {
+  if ('Notification' in window && Notification.permission !== 'granted') {
+    try {
+      await Notification.requestPermission();
+    } catch (e) {
+      console.warn('Error al solicitar permisos de notificación:', e);
+    }
   }
 }
 
@@ -140,6 +166,7 @@ async function initApp() {
           const fallbackUsername = currentUser.email ? currentUser.email.split('@')[0] : `User_${currentUser.id.slice(0, 5)}`;
           currentProfile = { username: fallbackUsername };
         }
+        window.currentUserUsername = currentProfile.username;
         await setupDashboardView();
       } else {
         currentUser = null;
@@ -329,7 +356,6 @@ async function updateRoomsList() {
       if (room.room_type === 'public') privacyTag = '🌐 pública';
       
       const isHost = room.host_id === currentUser.id;
-      const isOccupied = room.guest_id !== null;
       
       return `
         <div class="glass-card rounded-2xl p-4 flex justify-between items-center border border-slate-800/80 hover:border-sky-500/30 transition duration-300">
@@ -340,7 +366,7 @@ async function updateRoomsList() {
             </div>
             <p class="text-xs text-slate-400 font-inter">
               Host: <span class="text-slate-300 font-semibold">${room.host?.username || 'Desconocido'}</span> 
-              ${isOccupied ? `• Copiloto: <span class="text-sky-400 font-semibold">${room.guest?.username || 'Conectado'}</span>` : '• [Esperando Copiloto]'}
+              • <span class="text-sky-400 font-medium">🌐 Enlace MESH Activo</span>
             </p>
           </div>
           
@@ -348,10 +374,6 @@ async function updateRoomsList() {
             ${isHost ? `
               <button onclick="window.handleDeleteRoom('${room.id}')" class="px-3.5 py-1.5 rounded-xl bg-rose-950/30 hover:bg-rose-900/60 border border-rose-900/40 text-rose-300 text-xs font-bold transition">
                 Eliminar
-              </button>
-            ` : isOccupied ? `
-              <button disabled class="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-600 text-xs font-bold cursor-not-allowed">
-                Lleno
               </button>
             ` : `
               <button onclick="window.handleJoinRoom('${room.id}', '${room.room_type}', '${room.room_password || ''}')" class="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white text-xs font-bold transition shadow-md shadow-sky-500/10">
@@ -390,7 +412,12 @@ window.handleJoinRoom = async (roomId, type, serverPassword) => {
   }
   
   try {
-    const room = await joinRoomAsGuest(roomId, currentUser.id);
+    const rooms = await getActiveRooms();
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) {
+      alert('La sala ya no existe.');
+      return;
+    }
     await enterRoom(room, false);
   } catch (err) {
     alert('Error al ingresar a la sala: ' + err.message);
@@ -488,52 +515,25 @@ async function runSignalingForActiveRoom() {
   if (!activeRoom) return;
   
   await startSignaling(activeRoom.id, currentUser.id, isHostOfActiveRoom, localAudioStream, {
-    onRemoteStream: (remoteStream) => {
-      console.log('Stream remoto listo. Inicializando reproductor VoIP...');
-      playRemoteStream(remoteStream);
+    onRemoteStream: (remoteStream, peerId) => {
+      console.log(`Stream remoto de ${peerId} listo. Inicializando VoIP...`);
+      playRemoteStream(remoteStream, peerId);
+    },
+    onRemoteStreamRemoved: (peerId) => {
+      console.log(`Pista de voz remota de ${peerId} removida.`);
+      stopRemoteStream(peerId);
     },
     onConnectionState: (state) => {
       handleWebRTCStateChange(state);
     },
-    onRemoteSpeaking: (isSpeaking) => {
-      handleRemoteUserSpeaking(isSpeaking);
-    },
-    onRoomUpdate: async (updatedRoom) => {
-      console.log('Sala actualizada en tiempo real:', updatedRoom);
-      activeRoom = updatedRoom;
+    onRoomUpdate: async (participants) => {
+      console.log('Lista de participantes Presence sincronizada:', participants);
+      activeRoomParticipants = participants;
       await updateParticipantsUI();
-
-      // Check if we are guest but have been promoted to Host
-      if (updatedRoom.host_id === currentUser.id && !isHostOfActiveRoom) {
-        console.log('¡Promocionado de Copiloto a Piloto en vivo! Reiniciando señalización...');
-        isHostOfActiveRoom = true;
-        
-        // Stop current audio stream playback and reset WebRTC signaling
-        stopRemoteStream();
-        await closeConnection(updatedRoom.id);
-        
-        // Restart signaling as Host
-        await runSignalingForActiveRoom();
-        await updateParticipantsUI();
-      }
-      // If we are Host and the Guest has left
-      else if (isHostOfActiveRoom && !updatedRoom.guest_id) {
-        const peerConn = getPeerConnection();
-        if (peerConn && peerConn.connectionState !== 'closed') {
-          console.log('El Copiloto se ha desconectado. Reiniciando señalización para recibir uno nuevo...');
-          
-          stopRemoteStream();
-          await closeConnection(updatedRoom.id);
-          
-          // Re-initialize as Host in waiting state
-          await runSignalingForActiveRoom();
-          await updateParticipantsUI();
-        }
-      }
     },
     onRoomDeleted: async () => {
       console.log('La sala ha sido eliminada del servidor. Saliendo...');
-      alert('La sala ha sido eliminada por el creador o por inactividad.');
+      alert('La sala ha sido eliminada.');
       await exitActiveRoom();
     },
     onError: (err) => {
@@ -546,6 +546,7 @@ async function runSignalingForActiveRoom() {
 async function enterRoom(room, isHost) {
   activeRoom = room;
   isHostOfActiveRoom = isHost;
+  activeRoomParticipants = [];
   
   // Show Voice Call Screen
   showScreen('room');
@@ -558,6 +559,9 @@ async function enterRoom(room, isHost) {
   
   // Connecting visual state
   updateMushiVisualState('sleeping');
+
+  // Request notifications permission proactively
+  await requestNotificationPermission();
   
   try {
     // 1. Play Calling ringtone loop (purupuru)
@@ -572,9 +576,21 @@ async function enterRoom(room, isHost) {
     setLocalAudioTransmission(localAudioStream, false);
     
     // 3. Start WebRTC signaling and listen to connection lifecycle
-    dendenInstructions.innerText = 'Buscando enlace directo con copiloto...';
+    dendenInstructions.innerText = 'Buscando enlace directo con copilotos...';
     
     await runSignalingForActiveRoom();
+
+    // Show Call Notification in PWA
+    if ('Notification' in window && Notification.permission === 'granted') {
+      navigator.serviceWorker.ready.then(reg => {
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'SHOW_CALL_NOTIFICATION',
+            roomCode: room.room_code
+          });
+        }
+      });
+    }
 
     // Render active participants
     await updateParticipantsUI();
@@ -591,7 +607,7 @@ function handleWebRTCStateChange(state) {
   if (state === 'connected') {
     // Stop Purupuru ringtone
     stopRingtone();
-    callDuration.innerText = 'Conexión Establecida (VoIP)';
+    callDuration.innerText = 'Conexión Establecida (VoIP MESH)';
     dendenInstructions.innerText = 'Caracol de transmisión en línea. Mantén presionado🎙️ para hablar.';
     
     updateMushiVisualState('active');
@@ -601,7 +617,7 @@ function handleWebRTCStateChange(state) {
     updateMushiVisualState('sleeping');
   } else if (state === 'failed' || state === 'disconnected' || state === 'closed') {
     callDuration.innerText = 'Sin Conexión';
-    dendenInstructions.innerText = 'Reconectando con el caracol receptor...';
+    dendenInstructions.innerText = 'Reconectando con los caracoles receptores...';
     stopRemoteStream();
     
     updateMushiVisualState('sleeping');
@@ -630,82 +646,61 @@ function handleRemoteUserSpeaking(isSpeaking) {
   }
 }
 
-// Render dynamic participants cards and friend requests
+// Render dynamic participants cards based on active presence state
 async function updateParticipantsUI() {
   try {
-    // Re-fetch current room details to get host and guest usernames
-    const { data: room } = await supabase
-      .from('rooms')
-      .select(`
-        *,
-        host:profiles!rooms_host_id_fkey(username),
-        guest:profiles!rooms_guest_id_fkey(username)
-      `)
-      .eq('id', activeRoom.id)
-      .single();
+    if (!activeRoom) return;
 
-    if (!room) return;
-
-    const hostName = room.host?.username || 'Piloto';
-    const guestName = room.guest?.username || 'Copiloto...';
-    
-    // Check if we are friends with the other participant
-    const peerId = (currentUser.id === room.host_id) ? room.guest_id : room.host_id;
-    let isAlreadyFriend = false;
-    let hasSentFriendRequest = false;
-
-    if (peerId) {
-      const friends = await getFriendsList(currentUser.id);
-      const friendRecord = friends.find(f => f.friendId === peerId);
-      if (friendRecord) {
-        isAlreadyFriend = true;
-        if (friendRecord.status === 'pending') {
-          hasSentFriendRequest = true;
-        }
-      }
+    if (activeRoomParticipants.length === 0) {
+      participantsList.innerHTML = `
+        <div class="flex justify-center items-center bg-slate-900/20 px-3.5 py-3 rounded-xl border border-dashed border-slate-800/80 text-[10px] text-slate-500 uppercase tracking-widest font-black">
+          Esperando Copilotos...
+        </div>
+      `;
+      return;
     }
 
-    // Build participants elements HTML
-    let guestHTML = '';
-    if (room.guest_id) {
-      const showFriendButton = !isAlreadyFriend && peerId;
-      guestHTML = `
-        <div class="flex justify-between items-center bg-slate-900/40 px-3.5 py-2.5 rounded-xl border border-slate-800/60">
-          <div class="flex items-center gap-2">
-            <span class="text-xs">👤</span>
-            <span class="text-xs font-semibold text-slate-200">${guestName} (Copiloto)</span>
-          </div>
+    const friends = await getFriendsList(currentUser.id);
+
+    participantsList.innerHTML = activeRoomParticipants.map(participant => {
+      const isMe = participant.userId === currentUser.id;
+      const isHost = participant.isHost;
+      const roleText = isHost ? '👑 Piloto' : '👤 Copiloto';
+      
+      let actionHTML = '';
+      if (!isMe) {
+        const peerId = participant.userId;
+        const friendRecord = friends.find(f => f.friendId === peerId);
+        const isAlreadyFriend = !!friendRecord;
+        const hasSentFriendRequest = friendRecord && friendRecord.status === 'pending';
+
+        actionHTML = `
           <div>
-            ${showFriendButton ? `
-              <button id="add-peer-friend-btn" onclick="window.handleAddPeerFriend('${peerId}')" class="px-2.5 py-1 bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white text-[10px] font-black rounded-lg transition uppercase tracking-wider">
+            ${!isAlreadyFriend ? `
+              <button id="add-peer-friend-btn-${peerId}" onclick="window.handleAddPeerFriend('${peerId}')" class="px-2.5 py-1 bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white text-[10px] font-black rounded-lg transition uppercase tracking-wider">
                 + Amigo
               </button>
             ` : hasSentFriendRequest ? `
-              <span class="text-[9px] uppercase font-bold tracking-wider text-slate-500">Solicitud Enviada</span>
+              <span class="text-[9px] uppercase font-bold tracking-wider text-slate-500">Enviada</span>
             ` : `
               <span class="text-[9px] uppercase font-bold tracking-wider text-emerald-400">Enlazados</span>
             `}
           </div>
-        </div>
-      `;
-    } else {
-      guestHTML = `
-        <div class="flex justify-center items-center bg-slate-900/20 px-3.5 py-3 rounded-xl border border-dashed border-slate-800/80 text-[10px] text-slate-500 uppercase tracking-widest font-black">
-          Esperando Copiloto...
-        </div>
-      `;
-    }
+        `;
+      } else {
+        actionHTML = `<span class="text-[9px] uppercase font-bold tracking-wider text-slate-500">Tú</span>`;
+      }
 
-    participantsList.innerHTML = `
-      <div class="flex justify-between items-center bg-slate-900/40 px-3.5 py-2.5 rounded-xl border border-slate-800/60">
-        <div class="flex items-center gap-2">
-          <span class="text-xs">👑</span>
-          <span class="text-xs font-semibold text-slate-200">${hostName} (Piloto)</span>
+      return `
+        <div class="flex justify-between items-center bg-slate-900/40 px-3.5 py-2.5 rounded-xl border border-slate-800/60">
+          <div class="flex items-center gap-2">
+            <span class="text-xs">${isHost ? '👑' : '👤'}</span>
+            <span class="text-xs font-semibold text-slate-200">${participant.username} (${roleText})</span>
+          </div>
+          ${actionHTML}
         </div>
-        <span class="text-[9px] uppercase font-bold tracking-wider text-indigo-400">Creador</span>
-      </div>
-      ${guestHTML}
-    `;
+      `;
+    }).join('');
 
   } catch (err) {
     console.error('Error al actualizar UI de participantes:', err);
@@ -886,6 +881,17 @@ async function exitActiveRoom() {
   if (!activeRoom) return;
   
   const roomId = activeRoom.id;
+
+  // Clear Call Notification in PWA
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.ready.then(reg => {
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'CLEAR_CALL_NOTIFICATION'
+        });
+      }
+    });
+  }
   
   // Loading indicators
   callDuration.innerText = 'Desconectando...';
@@ -896,11 +902,15 @@ async function exitActiveRoom() {
     stopRemoteStream();
     stopMicrophone();
     
-    // 2. Shut down WebRTC signals and delete ice records
+    // 2. Shut down WebRTC signals and presence channels
+    const isRoomEmpty = activeRoomParticipants.length <= 1; // Only me left
     await closeConnection(roomId);
-    
-    // 3. Clear profile status in the database room record
-    await leaveRoom(roomId, currentUser.id);
+
+    // 3. If I was the last participant exiting the room, delete the room record automatically
+    if (isRoomEmpty) {
+      console.log(`La sala ${roomId} quedó vacía. Eliminando de la base de datos...`);
+      await deleteRoom(roomId);
+    }
     
   } catch (err) {
     console.warn('Error durante cierre y salida:', err);
@@ -909,6 +919,7 @@ async function exitActiveRoom() {
     activeRoom = null;
     isHostOfActiveRoom = false;
     localAudioStream = null;
+    activeRoomParticipants = [];
     
     // Return back to dashboard view
     setupDashboardView();

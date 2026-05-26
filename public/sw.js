@@ -75,3 +75,68 @@ self.addEventListener('fetch', (event) => {
       })
   );
 });
+
+// =========================================================================
+// CALL NOTIFICATION MANAGEMENT (BACKGROUND INTERACTION)
+// =========================================================================
+
+self.addEventListener('message', (event) => {
+  const data = event.data;
+  if (!data) return;
+
+  if (data.type === 'SHOW_CALL_NOTIFICATION') {
+    const options = {
+      body: `Enlace activo en sala: ${data.roomCode}`,
+      icon: '/images/dendenmushi/denden_activo.png',
+      badge: '/images/dendenmushi/denden_activo.png',
+      tag: 'denden-active-call',
+      renotify: false,
+      requireInteraction: true,
+      silent: true, // No sound since user is already in voice call
+      actions: [
+        { action: 'mute', title: '🎙️ Silenciar' },
+        { action: 'handsfree', title: '🔊 Manos Libres' },
+        { action: 'exit', title: '❌ Salir' }
+      ]
+    };
+
+    event.waitUntil(
+      self.registration.showNotification('Den Den Mushi Intercom', options)
+    );
+  } else if (data.type === 'CLEAR_CALL_NOTIFICATION') {
+    event.waitUntil(
+      self.registration.getNotifications({ tag: 'denden-active-call' })
+        .then((notifications) => {
+          notifications.forEach(n => n.close());
+        })
+    );
+  }
+});
+
+self.addEventListener('notificationclick', (event) => {
+  const notification = event.notification;
+  const action = event.action;
+
+  // For the exit action, close notification. For others, keep it to show call state.
+  if (action === 'exit') {
+    notification.close();
+  }
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clientList) => {
+        // Send the action to all pages
+        clientList.forEach((client) => {
+          client.postMessage({
+            type: 'NOTIFICATION_ACTION',
+            action: action
+          });
+        });
+
+        // If clicked on the main notification body, focus the app window
+        if (!action && clientList.length > 0) {
+          return clientList[0].focus();
+        }
+      })
+  );
+});
