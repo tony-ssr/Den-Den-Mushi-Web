@@ -42,6 +42,7 @@ let isHostOfActiveRoom = false;
 let localAudioStream = null;
 let realtimeRoomsChannel = null;
 let activeRoomParticipants = [];
+let deferredPrompt = null;
 
 // PTT and Swipe Gesture States
 let startY = 0;
@@ -103,7 +104,107 @@ let isSignUpMode = false;
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
   registerServiceWorker();
+  initPwaInstallPrompt();
 });
+
+// Capture PWA installation prompt globally at root level to avoid missing early triggers
+window.addEventListener('beforeinstallprompt', (e) => {
+  console.log('PWA: Evento beforeinstallprompt capturado a nivel global.');
+  e.preventDefault();
+  deferredPrompt = e;
+  
+  // Show prompt button if banner is loaded and not dismissed
+  const pwaInstallBanner = document.getElementById('pwa-install-banner');
+  const pwaInstallBtn = document.getElementById('pwa-install-btn');
+  const pwaIosInstructions = document.getElementById('pwa-ios-instructions');
+  
+  if (pwaInstallBanner && sessionStorage.getItem('pwa-banner-dismissed') !== 'true') {
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    if (!isStandalone) {
+      const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      if (!isIos) {
+        pwaInstallBtn.classList.remove('hidden');
+        pwaIosInstructions.classList.add('hidden');
+        pwaInstallBanner.classList.remove('hidden');
+      }
+    }
+  }
+});
+
+window.addEventListener('appinstalled', (event) => {
+  console.log('PWA: La aplicación Den Den Mushi ha sido instalada correctamente.');
+  const pwaInstallBanner = document.getElementById('pwa-install-banner');
+  if (pwaInstallBanner) {
+    pwaInstallBanner.classList.add('hidden');
+  }
+  deferredPrompt = null;
+});
+
+function initPwaInstallPrompt() {
+  const pwaInstallBanner = document.getElementById('pwa-install-banner');
+  const pwaInstallBtn = document.getElementById('pwa-install-btn');
+  const pwaCloseBannerBtn = document.getElementById('pwa-close-banner-btn');
+  const pwaIosInstructions = document.getElementById('pwa-ios-instructions');
+
+  if (!pwaInstallBanner) return;
+
+  // Check if running in standalone PWA mode
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (isStandalone) {
+    pwaInstallBanner.classList.add('hidden');
+    return;
+  }
+
+  // Check if dismissed previously in this session
+  if (sessionStorage.getItem('pwa-banner-dismissed') === 'true') {
+    pwaInstallBanner.classList.add('hidden');
+    return;
+  }
+
+  // Check OS
+  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+  if (isIos) {
+    // Show iOS Safari manual instructions
+    pwaIosInstructions.classList.remove('hidden');
+    pwaInstallBtn.classList.add('hidden');
+    pwaInstallBanner.classList.remove('hidden');
+  } else if (deferredPrompt) {
+    // Show Chrome / Android direct button
+    pwaInstallBtn.classList.remove('hidden');
+    pwaIosInstructions.classList.add('hidden');
+    pwaInstallBanner.classList.remove('hidden');
+  } else if (isMobile) {
+    // If on mobile but deferredPrompt hasn't fired yet, show general guidelines
+    pwaInstallBtn.classList.add('hidden');
+    pwaIosInstructions.innerHTML = 'Presiona el menú de tu navegador (los tres puntos <code>⋮</code>) y selecciona <span class="text-white font-bold font-outfit">"Instalar aplicación"</span> o <span class="text-white font-bold font-outfit">"Agregar a pantalla principal"</span>.';
+    pwaIosInstructions.classList.remove('hidden');
+    pwaInstallBanner.classList.remove('hidden');
+  }
+
+  // Hook up button clicks
+  if (pwaInstallBtn) {
+    pwaInstallBtn.addEventListener('click', async () => {
+      if (!deferredPrompt) {
+        alert('La instalación automática no está disponible en este navegador. Por favor instálala manualmente desde el menú del navegador.');
+        return;
+      }
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log(`PWA: Resultado de la solicitud de instalación: ${outcome}`);
+      deferredPrompt = null;
+      pwaInstallBanner.classList.add('hidden');
+    });
+  }
+
+  if (pwaCloseBannerBtn) {
+    pwaCloseBannerBtn.addEventListener('click', () => {
+      pwaInstallBanner.classList.add('hidden');
+      sessionStorage.setItem('pwa-banner-dismissed', 'true');
+    });
+  }
+}
 
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
@@ -322,6 +423,9 @@ logoutBtn.addEventListener('click', async () => {
 async function setupDashboardView() {
   showScreen('dashboard');
   userBadge.innerText = currentProfile.username;
+  
+  // Load and update PWA install prompt banner
+  initPwaInstallPrompt();
   
   // Load and update dashboard systems
   await updateRoomsList();

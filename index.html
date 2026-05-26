@@ -141,6 +141,32 @@
       </button>
     </header>
 
+    <!-- PWA Install Banner / Recommendation Card -->
+    <div id="pwa-install-banner" class="hidden bg-gradient-to-r from-sky-950/40 to-indigo-950/40 border border-sky-500/30 rounded-2xl p-4 mb-6 shadow-lg backdrop-blur-md flex flex-col sm:flex-row justify-between items-center gap-4 transition-all duration-300">
+      <div class="flex items-center gap-3.5">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-2xl shadow-md shadow-sky-500/20 flex-shrink-0 animate-bounce">
+          🐌
+        </div>
+        <div>
+          <h3 class="text-sm font-bold font-outfit text-white tracking-wide">📲 ¡INSTALA DEN DEN MUSHI PWA!</h3>
+          <p class="text-xs text-slate-300 font-inter mt-0.5 leading-relaxed">
+            Instala la aplicación en tu pantalla de inicio para habilitar el <span class="text-sky-400 font-semibold font-outfit">micrófono en segundo plano</span> y hablar con la pantalla apagada.
+          </p>
+          <p id="pwa-ios-instructions" class="hidden text-[10px] text-slate-400 font-inter mt-1">
+            En iOS / Safari: Presiona el botón <span class="text-white font-bold">Compartir 📤</span> y luego selecciona <span class="text-white font-bold">"Agregar a inicio" ➕</span>.
+          </p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+        <button id="pwa-install-btn" class="hidden w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white text-xs font-bold transition shadow-lg shadow-sky-500/25 cursor-pointer active:scale-95 whitespace-nowrap">
+          Instalar Ahora
+        </button>
+        <button id="pwa-close-banner-btn" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-xs font-semibold transition cursor-pointer whitespace-nowrap">
+          Cerrar
+        </button>
+      </div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-none lg:flex-1 lg:overflow-hidden pb-6 lg:pb-0">
       <!-- COLUMN 1 & 2: Rooms and Creation -->
       <section class="lg:col-span-2 flex flex-col space-y-6 lg:overflow-hidden">
