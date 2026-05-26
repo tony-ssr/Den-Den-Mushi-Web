@@ -20,6 +20,8 @@ import {
   stopMicrophone, 
   playRemoteStream, 
   stopRemoteStream, 
+  setPeerVolume,
+  setMasterVolume,
   playGachaSound, 
   startRingtone, 
   stopRingtone 
@@ -148,6 +150,21 @@ async function requestNotificationPermission() {
     } catch (e) {
       console.warn('Error al solicitar permisos de notificación:', e);
     }
+  }
+}
+
+function updatePwaNotificationMicState(micState) {
+  if (!activeRoom) return;
+  if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') {
+    navigator.serviceWorker.ready.then(reg => {
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SHOW_CALL_NOTIFICATION',
+          roomCode: activeRoom.room_code,
+          micState: micState
+        });
+      }
+    });
   }
 }
 
@@ -318,9 +335,15 @@ createRoomForm.addEventListener('submit', async (e) => {
   const code = roomCodeInput.value.toUpperCase().trim();
   const type = roomTypeSelect.value;
   const password = type === 'password' ? roomPasswordInput.value.trim() : null;
+  const isPermanent = document.getElementById('room-permanent-checkbox').checked;
   
   try {
-    const room = await createRoom(code, currentUser.id, type, password);
+    let dbPassword = password;
+    if (isPermanent) {
+      dbPassword = password ? `PERMANENT_${password}` : 'PERMANENT';
+    }
+
+    const room = await createRoom(code, currentUser.id, type, dbPassword);
     createRoomForm.reset();
     roomPasswordContainer.classList.add('hidden');
     roomPasswordInput.removeAttribute('required');
@@ -402,12 +425,19 @@ window.handleDeleteRoom = async (roomId) => {
 };
 
 window.handleJoinRoom = async (roomId, type, serverPassword) => {
+  let actualServerPassword = serverPassword;
+  if (serverPassword && serverPassword.startsWith('PERMANENT_')) {
+    actualServerPassword = serverPassword.slice('PERMANENT_'.length);
+  }
+
   if (type === 'password') {
-    const passwordEntered = prompt('Esta sala requiere contraseña de enlace:');
-    if (!passwordEntered) return;
-    if (passwordEntered !== serverPassword) {
-      alert('Contraseña de sala incorrecta. Acceso denegado.');
-      return;
+    if (actualServerPassword && actualServerPassword !== 'PERMANENT') {
+      const passwordEntered = prompt('Esta sala requiere contraseña de enlace:');
+      if (!passwordEntered) return;
+      if (passwordEntered !== actualServerPassword) {
+        alert('Contraseña de sala incorrecta. Acceso denegado.');
+        return;
+      }
     }
   }
   
@@ -562,6 +592,21 @@ async function enterRoom(room, isHost) {
 
   // Request notifications permission proactively
   await requestNotificationPermission();
+
+  // Attach master volume control listener
+  const masterVolumeSlider = document.getElementById('master-volume-slider');
+  const masterVolumeValue = document.getElementById('master-volume-value');
+  if (masterVolumeSlider && masterVolumeValue) {
+    masterVolumeSlider.value = 1.0;
+    masterVolumeValue.innerText = '100%';
+    setMasterVolume(1.0);
+
+    masterVolumeSlider.oninput = (e) => {
+      const vol = parseFloat(e.target.value);
+      setMasterVolume(vol);
+      masterVolumeValue.innerText = `${Math.round(vol * 100)}%`;
+    };
+  }
   
   try {
     // 1. Play Calling ringtone loop (purupuru)
@@ -586,7 +631,8 @@ async function enterRoom(room, isHost) {
         if (navigator.serviceWorker.controller) {
           navigator.serviceWorker.controller.postMessage({
             type: 'SHOW_CALL_NOTIFICATION',
-            roomCode: room.room_code
+            roomCode: room.room_code,
+            micState: 'muted'
           });
         }
       });
@@ -675,16 +721,29 @@ async function updateParticipantsUI() {
         const hasSentFriendRequest = friendRecord && friendRecord.status === 'pending';
 
         actionHTML = `
-          <div>
-            ${!isAlreadyFriend ? `
-              <button id="add-peer-friend-btn-${peerId}" onclick="window.handleAddPeerFriend('${peerId}')" class="px-2.5 py-1 bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white text-[10px] font-black rounded-lg transition uppercase tracking-wider">
-                + Amigo
-              </button>
-            ` : hasSentFriendRequest ? `
-              <span class="text-[9px] uppercase font-bold tracking-wider text-slate-500">Enviada</span>
-            ` : `
-              <span class="text-[9px] uppercase font-bold tracking-wider text-emerald-400">Enlazados</span>
-            `}
+          <div class="flex flex-col items-end space-y-1">
+            <div class="flex items-center gap-1.5 text-[9px] font-black text-sky-400 font-outfit uppercase">
+              <span>Vol:</span>
+              <span id="volume-val-${peerId}">100%</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="text-[10px]">🔉</span>
+              <input type="range" id="volume-slider-${peerId}" min="0" max="3" step="0.1" value="1"
+                oninput="window.handlePeerVolumeChange('${peerId}', this.value)"
+                class="w-20 h-1 rounded bg-slate-800 appearance-none cursor-pointer accent-sky-500 focus:outline-none">
+              <span class="text-[10px]">🚀</span>
+            </div>
+            <div class="pt-1.5">
+              ${!isAlreadyFriend ? `
+                <button id="add-peer-friend-btn-${peerId}" onclick="window.handleAddPeerFriend('${peerId}')" class="px-2.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[8px] font-bold rounded transition uppercase tracking-wider">
+                  + Amigo
+                </button>
+              ` : hasSentFriendRequest ? `
+                <span class="text-[8px] uppercase font-bold tracking-wider text-slate-500">Enviada</span>
+              ` : `
+                <span class="text-[8px] uppercase font-bold tracking-wider text-emerald-400">Enlazados</span>
+              `}
+            </div>
           </div>
         `;
       } else {
@@ -706,6 +765,23 @@ async function updateParticipantsUI() {
     console.error('Error al actualizar UI de participantes:', err);
   }
 }
+
+window.handlePeerVolumeChange = (peerId, val) => {
+  const vol = parseFloat(val);
+  setPeerVolume(peerId, vol);
+  const label = document.getElementById(`volume-val-${peerId}`);
+  if (label) {
+    label.innerText = `${Math.round(vol * 100)}%`;
+    if (vol > 1.0) {
+      label.classList.add('text-amber-400');
+      label.classList.remove('text-sky-400');
+      label.innerText = `${Math.round(vol * 100)}% 🚀`;
+    } else {
+      label.classList.remove('text-amber-400');
+      label.classList.add('text-sky-400');
+    }
+  }
+};
 
 // Add friend from room action
 window.handleAddPeerFriend = async (peerId) => {
@@ -775,6 +851,7 @@ function activatePTT() {
   isPttTransmitting = true;
   setLocalAudioTransmission(localAudioStream, true);
   updateMushiVisualState('transmitting');
+  updatePwaNotificationMicState('active');
   
   pttTriggerBtn.className = 'w-28 h-28 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-500 border border-emerald-400/50 flex flex-col items-center justify-center shadow-2xl scale-95 transition-all duration-150 ptt-active cursor-pointer touch-none z-20';
   pttButtonLabel.innerText = 'HABLANDO';
@@ -788,6 +865,7 @@ function deactivatePTT() {
   isPttTransmitting = false;
   setLocalAudioTransmission(localAudioStream, false);
   updateMushiVisualState('active');
+  updatePwaNotificationMicState('muted');
   
   pttTriggerBtn.className = 'w-28 h-28 rounded-full bg-gradient-to-tr from-slate-800 to-slate-950 border border-slate-700/60 flex flex-col items-center justify-center shadow-2xl active:scale-95 transition-all duration-150 cursor-pointer touch-none z-20';
   pttButtonLabel.innerText = 'PRESIONAR';
@@ -800,11 +878,9 @@ function activateLockMode() {
   isLockHandsFreeMode = true;
   isPttTransmitting = false;
   
-  // Play the gacha sound effect
-  playGachaSound();
-  
   // Force transmission open continuously
   setLocalAudioTransmission(localAudioStream, true);
+  updatePwaNotificationMicState('active');
   
   // Visual state to gold/amber glow
   dendenMushiImg.src = '/images/dendenmushi/denden_activo.png';
@@ -881,6 +957,7 @@ async function exitActiveRoom() {
   if (!activeRoom) return;
   
   const roomId = activeRoom.id;
+  const isPermanent = activeRoom.room_password === 'PERMANENT' || (activeRoom.room_password && activeRoom.room_password.startsWith('PERMANENT_'));
 
   // Clear Call Notification in PWA
   if ('serviceWorker' in navigator) {
@@ -907,9 +984,11 @@ async function exitActiveRoom() {
     await closeConnection(roomId);
 
     // 3. If I was the last participant exiting the room, delete the room record automatically
-    if (isRoomEmpty) {
-      console.log(`La sala ${roomId} quedó vacía. Eliminando de la base de datos...`);
+    if (isRoomEmpty && !isPermanent) {
+      console.log(`La sala ${roomId} quedó vacía y no es permanente. Eliminando de la base de datos...`);
       await deleteRoom(roomId);
+    } else if (isPermanent) {
+      console.log(`La sala ${roomId} es permanente. Preservando en base de datos.`);
     }
     
   } catch (err) {

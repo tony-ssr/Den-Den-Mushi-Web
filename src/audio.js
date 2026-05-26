@@ -9,6 +9,8 @@ let ringtoneAudio = null;
 let currentMicSource = null;
 let helmetHighPass = null;
 let helmetBandPass = null;
+let remoteGainNodes = {}; // peerId -> GainNode
+let masterGainNode = null;
 
 // Audio elements for sound effects are disabled
 
@@ -139,6 +141,11 @@ export function playRemoteStream(remoteStream, peerId = 'default') {
     // Connect remote stream to the Web Audio output graph for smooth mixing with system apps
     const remoteSource = ctx.createMediaStreamSource(remoteStream);
     
+    // Create peer-specific GainNode for independent volume controls and speech boosting
+    const peerGainNode = ctx.createGain();
+    peerGainNode.gain.value = 1.0; // 100% by default
+    remoteGainNodes[peerId] = peerGainNode;
+
     // Create a compressor to level out speech volume spikes while riding
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.setValueAtTime(-24, ctx.currentTime);
@@ -147,13 +154,17 @@ export function playRemoteStream(remoteStream, peerId = 'default') {
     compressor.attack.setValueAtTime(0.003, ctx.currentTime);
     compressor.release.setValueAtTime(0.25, ctx.currentTime);
 
-    // Main output volume gain
-    const outGain = ctx.createGain();
-    outGain.gain.value = 1.0;
+    // Initialize master gain node if not already present
+    if (!masterGainNode) {
+      masterGainNode = ctx.createGain();
+      masterGainNode.gain.value = 1.0;
+      masterGainNode.connect(ctx.destination);
+    }
 
-    remoteSource.connect(compressor);
-    compressor.connect(outGain);
-    outGain.connect(ctx.destination);
+    // Pipeline: remoteSource -> peerGainNode -> compressor -> masterGainNode
+    remoteSource.connect(peerGainNode);
+    peerGainNode.connect(compressor);
+    compressor.connect(masterGainNode);
 
     // Audio element plays in parallel to maintain connection, but we keep volume low or rely on the Web Audio context
     audioElement.volume = 0.01; 
@@ -161,7 +172,7 @@ export function playRemoteStream(remoteStream, peerId = 'default') {
       console.warn('Autoplay bloqueado en el elemento de audio, sonará a través del AudioContext:', e);
     });
 
-    console.log(`Flujo de audio remoto para ${peerId} conectado exitosamente.`);
+    console.log(`Flujo de audio remoto para ${peerId} conectado exitosamente con controles de volumen.`);
   } catch (err) {
     console.error('Error al reproducir stream de audio remoto:', err);
   }
@@ -179,6 +190,13 @@ export function stopRemoteStream(peerId) {
       audioElement.pause();
       audioElement.remove();
     }
+    
+    // Clean up peer gain node reference
+    if (remoteGainNodes[peerId]) {
+      remoteGainNodes[peerId].disconnect();
+      delete remoteGainNodes[peerId];
+    }
+    
     console.log(`Audio remoto de WebRTC para peer ${peerId} detenido.`);
   } else {
     // Select all audio elements starting with webrtc-remote-audio-
@@ -188,8 +206,42 @@ export function stopRemoteStream(peerId) {
       audioElement.pause();
       audioElement.remove();
     });
+
+    // Clean up all peer gain node references
+    Object.keys(remoteGainNodes).forEach(id => {
+      if (remoteGainNodes[id]) {
+        remoteGainNodes[id].disconnect();
+      }
+    });
+    remoteGainNodes = {};
+
     console.log('Todos los flujos de audio remoto de WebRTC detenidos.');
   }
+}
+
+/**
+ * Set remote peer specific volume level (supports boost up to 300%)
+ */
+export function setPeerVolume(peerId, volume) {
+  const gainNode = remoteGainNodes[peerId];
+  if (gainNode) {
+    gainNode.gain.setValueAtTime(volume, getAudioContext().currentTime);
+    console.log(`Volumen para peer ${peerId} ajustado a: ${Math.round(volume * 100)}%`);
+  }
+}
+
+/**
+ * Set master call volume level
+ */
+export function setMasterVolume(volume) {
+  const ctx = getAudioContext();
+  if (!masterGainNode) {
+    masterGainNode = ctx.createGain();
+    masterGainNode.gain.value = 1.0;
+    masterGainNode.connect(ctx.destination);
+  }
+  masterGainNode.gain.setValueAtTime(volume, ctx.currentTime);
+  console.log(`Volumen maestro ajustado a: ${Math.round(volume * 100)}%`);
 }
 
 /**

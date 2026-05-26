@@ -85,19 +85,26 @@ self.addEventListener('message', (event) => {
   if (!data) return;
 
   if (data.type === 'SHOW_CALL_NOTIFICATION') {
+    const isMicActive = data.micState === 'active';
+    
+    // Walkie-Talkie style dynamic buttons
+    const actions = isMicActive ? [
+      { action: 'mute', title: '🔇 Silenciar Micrófono' },
+      { action: 'exit', title: '❌ Salir' }
+    ] : [
+      { action: 'handsfree', title: '🎤 Hablar (Manos Libres)' },
+      { action: 'exit', title: '❌ Salir' }
+    ];
+
     const options = {
-      body: `Enlace activo en sala: ${data.roomCode}`,
+      body: `Enlace activo en sala: ${data.roomCode}\nEstado: ${isMicActive ? '🔴 TRANSMITIENDO VOZ' : '🎙️ EN ESPERA (MUTED)'}`,
       icon: '/images/dendenmushi/denden_activo.png',
       badge: '/images/dendenmushi/denden_activo.png',
       tag: 'denden-active-call',
       renotify: false,
       requireInteraction: true,
       silent: true, // No sound since user is already in voice call
-      actions: [
-        { action: 'mute', title: '🎙️ Silenciar' },
-        { action: 'handsfree', title: '🔊 Manos Libres' },
-        { action: 'exit', title: '❌ Salir' }
-      ]
+      actions: actions
     };
 
     event.waitUntil(
