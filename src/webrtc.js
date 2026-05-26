@@ -35,6 +35,8 @@ export async function startSignaling(
     onRemoteStream,
     onConnectionState,
     onRemoteSpeaking, // fires with true/false based on speaking volume
+    onRoomUpdate,
+    onRoomDeleted,
     onError
   } = callbacks;
 
@@ -97,10 +99,22 @@ export async function startSignaling(
       .channel(`room_signals_${roomId}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
+        { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
         async (payload) => {
+          if (payload.eventType === 'DELETE') {
+            console.log('La sala ha sido eliminada de la base de datos.');
+            if (onRoomDeleted) {
+              await onRoomDeleted();
+            }
+            return;
+          }
+
           const room = payload.new;
           console.log('Sala actualizada en base de datos:', room);
+
+          if (onRoomUpdate) {
+            await onRoomUpdate(room);
+          }
 
           if (isHost) {
             // A. Host listens to guest joining and answers

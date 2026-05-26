@@ -9,6 +9,7 @@ import {
   createRoom, 
   joinRoomAsGuest, 
   leaveRoom, 
+  deleteRoom,
   getFriendsList, 
   sendFriendRequest, 
   acceptFriendRequest 
@@ -27,6 +28,7 @@ import {
 import { 
   startSignaling, 
   closeConnection, 
+  getPeerConnection,
   setLocalAudioTransmission 
 } from './webrtc';
 
@@ -369,7 +371,7 @@ async function updateRoomsList() {
 window.handleDeleteRoom = async (roomId) => {
   if (confirm('¿Deseas cerrar permanentemente esta sala?')) {
     try {
-      await leaveRoom(roomId, true);
+      await deleteRoom(roomId);
       await updateRoomsList();
     } catch (err) {
       alert('Error: ' + err.message);
@@ -482,6 +484,65 @@ window.handleAcceptFriend = async (relationshipId) => {
 // 3. INTERCOM VOICE ROOM ACTIVE VIEW
 // ============================================================================
 
+async function runSignalingForActiveRoom() {
+  if (!activeRoom) return;
+  
+  await startSignaling(activeRoom.id, currentUser.id, isHostOfActiveRoom, localAudioStream, {
+    onRemoteStream: (remoteStream) => {
+      console.log('Stream remoto listo. Inicializando reproductor VoIP...');
+      playRemoteStream(remoteStream);
+    },
+    onConnectionState: (state) => {
+      handleWebRTCStateChange(state);
+    },
+    onRemoteSpeaking: (isSpeaking) => {
+      handleRemoteUserSpeaking(isSpeaking);
+    },
+    onRoomUpdate: async (updatedRoom) => {
+      console.log('Sala actualizada en tiempo real:', updatedRoom);
+      activeRoom = updatedRoom;
+      await updateParticipantsUI();
+
+      // Check if we are guest but have been promoted to Host
+      if (updatedRoom.host_id === currentUser.id && !isHostOfActiveRoom) {
+        console.log('¡Promocionado de Copiloto a Piloto en vivo! Reiniciando señalización...');
+        isHostOfActiveRoom = true;
+        
+        // Stop current audio stream playback and reset WebRTC signaling
+        stopRemoteStream();
+        await closeConnection(updatedRoom.id);
+        
+        // Restart signaling as Host
+        await runSignalingForActiveRoom();
+        await updateParticipantsUI();
+      }
+      // If we are Host and the Guest has left
+      else if (isHostOfActiveRoom && !updatedRoom.guest_id) {
+        const peerConn = getPeerConnection();
+        if (peerConn && peerConn.connectionState !== 'closed') {
+          console.log('El Copiloto se ha desconectado. Reiniciando señalización para recibir uno nuevo...');
+          
+          stopRemoteStream();
+          await closeConnection(updatedRoom.id);
+          
+          // Re-initialize as Host in waiting state
+          await runSignalingForActiveRoom();
+          await updateParticipantsUI();
+        }
+      }
+    },
+    onRoomDeleted: async () => {
+      console.log('La sala ha sido eliminada del servidor. Saliendo...');
+      alert('La sala ha sido eliminada por el creador o por inactividad.');
+      await exitActiveRoom();
+    },
+    onError: (err) => {
+      console.error('Error WebRTC:', err);
+      alert('Error en llamada WebRTC: ' + err.message);
+    }
+  });
+}
+
 async function enterRoom(room, isHost) {
   activeRoom = room;
   isHostOfActiveRoom = isHost;
@@ -513,22 +574,7 @@ async function enterRoom(room, isHost) {
     // 3. Start WebRTC signaling and listen to connection lifecycle
     dendenInstructions.innerText = 'Buscando enlace directo con copiloto...';
     
-    await startSignaling(room.id, currentUser.id, isHost, localAudioStream, {
-      onRemoteStream: (remoteStream) => {
-        console.log('Stream remoto listo. Inicializando reproductor VoIP...');
-        playRemoteStream(remoteStream);
-      },
-      onConnectionState: (state) => {
-        handleWebRTCStateChange(state);
-      },
-      onRemoteSpeaking: (isSpeaking) => {
-        handleRemoteUserSpeaking(isSpeaking);
-      },
-      onError: (err) => {
-        console.error('Error WebRTC:', err);
-        alert('Error en llamada WebRTC: ' + err.message);
-      }
-    });
+    await runSignalingForActiveRoom();
 
     // Render active participants
     await updateParticipantsUI();
@@ -840,7 +886,6 @@ async function exitActiveRoom() {
   if (!activeRoom) return;
   
   const roomId = activeRoom.id;
-  const wasHost = isHostOfActiveRoom;
   
   // Loading indicators
   callDuration.innerText = 'Desconectando...';
@@ -855,7 +900,7 @@ async function exitActiveRoom() {
     await closeConnection(roomId);
     
     // 3. Clear profile status in the database room record
-    await leaveRoom(roomId, wasHost);
+    await leaveRoom(roomId, currentUser.id);
     
   } catch (err) {
     console.warn('Error durante cierre y salida:', err);

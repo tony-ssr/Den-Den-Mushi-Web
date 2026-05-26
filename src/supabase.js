@@ -116,21 +116,62 @@ export async function joinRoomAsGuest(roomId, guestId) {
   return data;
 }
 
-export async function leaveRoom(roomId, isHost) {
+export async function leaveRoom(roomId, userId) {
+  // First, fetch current room status to know who is who
+  const { data: room, error: fetchError } = await supabase
+    .from('rooms')
+    .select('*')
+    .eq('id', roomId)
+    .maybeSingle();
+
+  if (fetchError || !room) {
+    console.warn('No se pudo encontrar la sala al salir:', fetchError || 'Sala no existe');
+    return null;
+  }
+
+  const isHost = room.host_id === userId;
+  const isGuest = room.guest_id === userId;
+
   if (isHost) {
-    // Hosts delete the room to terminate the connection for everyone
-    return await deleteRoom(roomId);
-  } else {
-    // Guests just remove themselves and clean signaling
+    if (room.guest_id) {
+      // Host is leaving but there is a Guest: Promote Guest to Host
+      console.log(`Promoviendo Copiloto ${room.guest_id} a Piloto de sala ${roomId}`);
+      const { data, error } = await supabase
+        .from('rooms')
+        .update({ 
+          host_id: room.guest_id, 
+          guest_id: null, 
+          sdp_offer: null, 
+          sdp_answer: null 
+        })
+        .eq('id', roomId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    } else {
+      // Host is leaving and no Guest: Delete the room entirely
+      console.log(`El Piloto sale de sala ${roomId} vacía. Eliminando sala...`);
+      return await deleteRoom(roomId);
+    }
+  } else if (isGuest) {
+    // Guest is leaving: Clear guest_id and signaling
+    console.log(`Copiloto ${userId} sale de sala ${roomId}. Limpiando señalización...`);
     const { data, error } = await supabase
       .from('rooms')
-      .update({ guest_id: null, sdp_offer: null, sdp_answer: null })
+      .update({ 
+        guest_id: null, 
+        sdp_offer: null, 
+        sdp_answer: null 
+      })
       .eq('id', roomId)
       .select()
       .single();
     if (error) throw error;
     return data;
   }
+  
+  return null;
 }
 
 export async function updateRoomSignaling(roomId, sdpField, sdpData) {
